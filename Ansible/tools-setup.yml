@@ -1,0 +1,154 @@
+---
+- name: Configure Jenkins DevOps Server
+  hosts: all
+  become: yes
+
+  tasks:
+
+    # -------------------------
+    # Update System
+    # -------------------------
+
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+
+    - name: Upgrade all packages
+      apt:
+        upgrade: dist
+
+    # -------------------------
+    # Install Java 17
+    # -------------------------
+
+    - name: Install Java 17
+      apt:
+        name: openjdk-17-jdk
+        state: present
+
+    # -------------------------
+    # Install Jenkins
+    # -------------------------
+
+    - name: Create apt keyrings directory
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: Download Jenkins GPG key
+      get_url:
+        url: https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key
+        dest: /etc/apt/keyrings/jenkins-keyring.asc
+        mode: '0644'
+
+    - name: Add Jenkins repository
+      apt_repository:
+        repo: "deb [signed-by=/etc/apt/keyrings/jenkins-keyring.asc] https://pkg.jenkins.io/debian-stable binary/"
+        state: present
+        filename: jenkins
+
+    - name: Update apt cache after adding Jenkins repository
+      apt:
+        update_cache: yes
+
+    - name: Install Jenkins
+      apt:
+        name: jenkins
+        state: present
+
+    - name: Enable Jenkins
+      service:
+        name: jenkins
+        enabled: yes
+
+    - name: Start Jenkins
+      service:
+        name: jenkins
+        state: started
+
+    # -------------------------
+    # Install Docker
+    # -------------------------
+
+    - name: Install Docker
+      apt:
+        name: docker.io
+        state: present
+
+    - name: Enable Docker
+      service:
+        name: docker
+        enabled: yes
+
+    - name: Start Docker
+      service:
+        name: docker
+        state: started
+
+    - name: Add ubuntu user to docker group
+      user:
+        name: ubuntu
+        groups: docker
+        append: yes
+
+    # -------------------------
+    # Run SonarQube
+    # -------------------------
+
+    - name: Pull SonarQube image
+      command: docker pull sonarqube:lts-community
+
+    - name: Remove existing SonarQube container
+      shell: docker rm -f sonarqube || true
+
+    - name: Run SonarQube container
+      command: >
+        docker run -d
+        --name sonarqube
+        -p 9000:9000
+        sonarqube:lts-community
+
+    # -------------------------
+    # Install Trivy
+    # -------------------------
+
+    - name: Install required packages
+      apt:
+        name:
+          - wget
+          - apt-transport-https
+          - gnupg
+          - lsb-release
+        state: present
+
+    - name: Download Trivy GPG key
+      shell: |
+        wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key \
+        | gpg --dearmor -o /usr/share/keyrings/trivy.gpg
+      args:
+        creates: /usr/share/keyrings/trivy.gpg
+
+    - name: Add Trivy repository
+      shell: |
+        echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb generic main" \
+        | tee /etc/apt/sources.list.d/trivy.list
+      args:
+        creates: /etc/apt/sources.list.d/trivy.list
+
+    - name: Update apt cache after adding Trivy repository
+      apt:
+        update_cache: yes
+
+    - name: Install Trivy
+      apt:
+        name: trivy
+        state: present
+
+    # -------------------------
+    # Success Message
+    # -------------------------
+
+    - name: Installation completed
+      debug:
+        msg: "All installations completed successfully!"

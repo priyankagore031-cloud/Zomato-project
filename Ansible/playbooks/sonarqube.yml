@@ -1,0 +1,27 @@
+---
+- name: Deploy SonarQube
+  hosts: jenkins
+  become: yes
+
+  tasks:
+
+    - name: Pull SonarQube Docker Image
+      command: docker pull sonarqube:lts-community
+
+    - name: Remove existing SonarQube Container
+      shell: docker rm -f sonarqube || true
+
+    - name: Run SonarQube Container
+      command: >
+        docker run -d
+        --name sonarqube
+        -p 9000:9000
+        sonarqube:lts-community
+
+    - name: Verify SonarQube Container
+      command: docker ps
+      register: sonar_status
+      changed_when: false
+
+    - debug:
+        var: sonar_status.stdout_lines

@@ -1,0 +1,134 @@
+pipeline {
+    agent any
+    tools {
+        jdk 'jdk17'
+        nodejs 'node25'
+    }
+    environment {
+        SCANNER_HOME = tool 'sonar-scanner'
+        DOCKER_IMAGE = "priyanka031/zomato:${env.BUILD_NUMBER}"
+    }
+    stages {
+        stage ("clean workspace") {
+            steps {
+                cleanWs()
+            }
+        }
+        stage ("Git Checkout") {
+            steps {
+                git branch: 'main',
+                git 'https://github.com/priyankagore031-cloud/Zomato-project.git'
+            }
+        }
+        stage("Sonarqube Analysis") {
+            steps {
+                withSonarQubeEnv('sonar-server') {
+                    sh ''' $SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=zomato \
+                    -Dsonar.projectKey=zomato '''
+                }
+            }
+        }
+        stage("Code Quality Gate") {
+            steps {
+                script {
+                    // Continue even if quality gate fails
+                    def qualityGate = waitForQualityGate abortPipeline: false
+                    if (qualityGate.status != 'OK') {
+                        echo "Warning: Quality Gate status is ${qualityGate.status}"
+                        currentBuild.result = 'UNSTABLE'
+                    }
+                }
+            }
+        }
+        stage("Install NPM Dependencies") {
+            steps {
+                sh "npm install"
+            }
+        }
+        stage ("Trivy File Scan") {
+            steps {
+                sh "trivy fs . --exit-code 0 --no-progress > trivy.txt || echo 'Trivy scan completed'"
+            }
+        }
+        stage ("Build Docker Image") {
+            steps {
+                script {
+                    // Check if Docker is available
+                    sh 'docker --version'
+                    sh "docker build -t zomato ."
+                }
+            }
+        }
+        stage ("Tag & Push to DockerHub") {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'docker') {
+                        sh "docker tag zomato ${DOCKER_IMAGE}"
+                        sh "docker push ${DOCKER_IMAGE}"
+                    }
+                }
+            }
+        }
+        stage('Docker Scout Image') {
+            steps {
+                script {
+                    // Check if docker-scout is available, skip if not
+                    sh '''
+                        if command -v docker-scout &> /dev/null; then
+                            docker-scout quickview ${DOCKER_IMAGE} || echo "docker-scout quickview failed"
+                            docker-scout cves ${DOCKER_IMAGE} || echo "docker-scout cves failed"
+                        else
+                            echo "docker-scout not available, skipping"
+                        fi
+                    '''
+                }
+            }
+        }
+        stage ("Deploy to Container") {
+            steps {
+                script {
+                    sh '''
+                        # Stop and remove existing container if it exists
+                        docker stop zomato || true
+                        docker rm zomato || true
+                        # Run new container
+                        docker run -d --name zomato -p 3000:3000 priyanka031/zomato:${env.BUILD_NUMBER}
+                    '''
+                }
+            }
+        }
+    }
+    post {
+        always {
+            emailext attachLog: true,
+                subject: "Build ${currentBuild.result ?: 'SUCCESS'} - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                body: """
+                    <html>
+                    <body>
+                        <h2>Build Notification</h2>
+                        <div style="border: 1px solid #ccc; padding: 10px; margin: 10px 0;">
+                            <strong>Project:</strong> ${env.JOB_NAME}<br/>
+                            <strong>Build Number:</strong> ${env.BUILD_NUMBER}<br/>
+                            <strong>Result:</strong> ${currentBuild.result ?: 'SUCCESS'}<br/>
+                            <strong>URL:</strong> <a href="${env.BUILD_URL}">${env.BUILD_URL}</a>
+                        </div>
+                    </body>
+                    </html>
+                """,
+                to: 'priyanka.gore031@gmail.com',
+                mimeType: 'text/html'
+        }
+        success {
+            emailext attachLog: false,
+                subject: "SUCCESS - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                body: "Build completed successfully!",
+                to: 'priyanka.gore031@gmail.com'
+        }
+        failure {
+            emailext attachLog: true,
+                subject: "FAILED - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                body: "Build failed! Check the logs for details.",
+                to: 'priyanka.gore031@gmail.com'
+        }
+    }
+}
