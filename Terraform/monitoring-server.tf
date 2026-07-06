@@ -1,4 +1,4 @@
-/*resource "aws_instance" "monitoring_server" {
+resource "aws_instance" "monitoring_server" {
 
 
     ami = "ami-01a00762f46d584a1"
@@ -20,4 +20,3 @@
         volume_size = 20
     }
 }
-*/
